@@ -37,10 +37,10 @@ $(BUILDDIR)/csl/libraries.list: $(BUILDDIR)/csl/cxx_finder$(EXE) $(BUILDDIR)/csl
 	@cat "$@.preuniq" | sort | uniq > "$@"
 	@rm -f "$@.preuniq"
 
-UNINSTALL_compilersupportlibraries = delete-uninstaller "$(foreach lib,$(shell cat $(BUILDDIR)/csl/libraries.list),$(build_shlibdir)/$(shell basename $(lib)))"
+
 $(build_prefix)/manifest/compilersupportlibraries: $(BUILDDIR)/csl/libraries.list | $(build_shlibdir) $(build_prefix)/manifest
 	@cp -v $$(cat "$<") $(build_shlibdir)/
-	echo '$(UNINSTALL_compilersupportlibraries)' > "$@"
+	echo 'delete-uninstaller "$(foreach lib,$(shell cat $(BUILDDIR)/csl/libraries.list),$(build_shlibdir)/$(shell basename $(lib)))"' > "$@"
 
 get-compilersupportlibraries:
 extract-compilersupportlibraries:

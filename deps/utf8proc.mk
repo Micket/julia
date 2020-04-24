@@ -26,7 +26,7 @@ define UTF8PROC_INSTALL
 	mkdir -p $2/$$(build_includedir) $2/$$(build_libdir)
 	cp $1/utf8proc.h $2/$$(build_includedir)
 	cp $1/libutf8proc.a $2/$$(build_libdir)
-	cp $1/libutf8proc.$(shlib_ext) $2/$$(build_shlibdir)
+	-cp $1/libutf8proc.$(SHLIB_EXT) $2/$$(build_shlibdir)
 endef
 $(eval $(call staged-install, \
 	utf8proc,$(UTF8PROC_SRC_DIR), \
