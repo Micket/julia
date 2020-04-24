@@ -1,27 +1,45 @@
 ifneq ($(USE_BINARYBUILDER_CSL),1)
 
 # If we're not using BB-vendored CompilerSupportLibraries, then we must
-# build our own by stealing the libraries from the currently-running system
-CSL_FORTRAN_LIBDIR := $(dir $(shell $(FC) --print-file-name libgfortran.$(SHLIB_EXT)))
-CSL_CXX_LIBDIR := $(dir $(shell $(CXX) --print-file-name libstdc++.$(SHLIB_EXT)))
+# build our own by stealing the libraries from the currently-running system.
+# While at first it seemed a grand idea to use `g++` and `clang++`'s built-in
+# facilities for locating compiler support libraries (`--print-file-name $lib`)
+# it turns out this is quite unreliable, so we fall back to what we know best:
+# just compile the blasted thing then analyze the output after.  We'll compile
+# test programs, then analyze the linkage in order to discover the location of
+# the relevant compiler support libraries.
 
-CXX_LIBS := libgcc_s libstdc++ libc++ libgomp
-FORTRAN_LIBS := libgfortran libquadmath
+$(BUILDDIR)/csl:
+	mkdir -p "$@"
 
-define cxx_src
-$(CSL_CXX_LIBDIR)/$(1)*.$(SHLIB_EXT)*
-endef
-define fortran_src
-$(CSL_FORTRAN_LIBDIR)/$(1)*.$(SHLIB_EXT)*
-endef
+$(BUILDDIR)/csl/cxx_finder.cc: | $(BUILDDIR)/csl
+	@echo "#include <iostream>\n#include <omp.h>\nint main(void) { return omp_get_thread_num(); }" > "$@"
+$(BUILDDIR)/csl/fortran_finder.f95: | $(BUILDDIR)/csl
+	@echo "program julia\nend program julia" > "$@"
 
-CXX_LIB_PATHS := $(foreach f,$(wildcard $(foreach lib,$(CXX_LIBS),$(call cxx_src,$(lib)))),$(realpath $(f)))
-FORTRAN_LIB_PATHS := $(foreach f,$(wildcard $(foreach lib,$(FORTRAN_LIBS),$(call fortran_src,$(lib)))),$(realpath $(f)))
+$(BUILDDIR)/csl/cxx_finder$(EXE): $(BUILDDIR)/csl/cxx_finder.cc
+	@$(call PRINT_CC,$(CXX) -x c++ -o "$@" -fopenmp "$<")
 
-UNINSTALL_compilersupportlibraries = delete-uninstaller "$(wildcard $(foreach lib,$(CXX_LIBS) $(FORTRAN_LIBS),$(build_shlibdir)/$(lib)*.$(SHLIB_EXT)*))"
-$(build_prefix)/manifest/compilersupportlibraries: | $(build_shlibdir) $(build_prefix)/manifest
-	cp -va -l $(CXX_LIB_PATHS) $(build_shlibdir)/
-	cp -va $(FORTRAN_LIB_PATHS) $(build_shlibdir)/
+$(BUILDDIR)/csl/fortran_finder$(EXE): $(BUILDDIR)/csl/fortran_finder.f95
+	@$(call PRINT_CC,$(FC) -ffree-form -x f95 -o "$@" "$<")
+
+# We're going to capture things we directly depend on:
+CSL_LIBS := libgcc_s libstdc++ libc++ libpthread libgfortran libquadmath
+# And also things that dependencies may depend on
+CSL_LIBS += libgcc_ext libgomp libiomp libasan libatomic libcilkrts libitm liblsan libmpx libmpxwrappers libssp libtsan libubsan
+# Things that I don't think anything in the Julia ecosystem uses, but are still included in the real CSL_jll
+CSL_LIBS += libobjc libobjc-gnu
+
+$(BUILDDIR)/csl/libraries.list: $(BUILDDIR)/csl/cxx_finder$(EXE) $(BUILDDIR)/csl/fortran_finder$(EXE) | $(build_prefix)/manifest/libwhich
+	@rm -f "$@" "$@.preuniq"
+	@$(call spawn,$(build_depsbindir)/libwhich) -a $(BUILDDIR)/csl/cxx_finder$(EXE) | tr '\0' '\n' | grep $(foreach lib,$(CSL_LIBS),-e $(lib)) >> "$@.preuniq"
+	@$(call spawn,$(build_depsbindir)/libwhich) -a $(BUILDDIR)/csl/fortran_finder$(EXE) | tr '\0' '\n' | grep $(foreach lib,$(CSL_LIBS),-e $(lib)) >> "$@.preuniq"
+	@cat "$@.preuniq" | sort | uniq > "$@"
+	@rm -f "$@.preuniq"
+
+UNINSTALL_compilersupportlibraries = delete-uninstaller "$(foreach lib,$(shell cat $(BUILDDIR)/csl/libraries.list),$(build_shlibdir)/$(shell basename $(lib)))"
+$(build_prefix)/manifest/compilersupportlibraries: $(BUILDDIR)/csl/libraries.list | $(build_shlibdir) $(build_prefix)/manifest
+	@cp -v $$(cat "$<") $(build_shlibdir)/
 	echo '$(UNINSTALL_compilersupportlibraries)' > "$@"
 
 get-compilersupportlibraries:
