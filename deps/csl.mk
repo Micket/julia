@@ -13,15 +13,24 @@ $(BUILDDIR)/csl:
 	mkdir -p "$@"
 
 $(BUILDDIR)/csl/cxx_finder.cc: | $(BUILDDIR)/csl
-	@echo "#include <iostream>\n#include <omp.h>\nint main(void) { return omp_get_thread_num(); }" > "$@"
+	@echo "#include <iostream>" > "$@"
+	@echo "int main(void) { return 0; }" >> "$@"
+$(BUILDDIR)/csl/cxx_finder_omp.cc: | $(BUILDDIR)/csl
+	@echo "#include <iostream>" > "$@"
+	@echo "#include <omp.h>" >> "$@"
+	@echo "int main(void) { return omp_get_thread_num(); }" >> "$@"
 $(BUILDDIR)/csl/fortran_finder.f95: | $(BUILDDIR)/csl
-	@echo "program julia\nend program julia" > "$@"
+	@echo "program julia" > "$@"
+	@echo "end program julia" >> "$@"
 
-$(BUILDDIR)/csl/cxx_finder$(EXE): $(BUILDDIR)/csl/cxx_finder.cc
-	@$(call PRINT_CC,$(CXX) -x c++ -o "$@" -fopenmp "$<")
+$(BUILDDIR)/csl/cxx_finder.$(SHLIB_EXT): $(BUILDDIR)/csl/cxx_finder.cc $(BUILDDIR)/csl/cxx_finder_omp.cc
+	# Definitely compile the non-openmp version
+	@$(call PRINT_CC,$(CXX) -shared $(fPIC) -o "$@" "$(BUILDDIR)/csl/cxx_finder.cc")
+	# Try for the openmp version
+	@-$(call PRINT_CC,$(CXX) -shared $(fPIC) -o "$@" -fopenmp "$(BUILDDIR)/csl/cxx_finder_omp.cc")
 
-$(BUILDDIR)/csl/fortran_finder$(EXE): $(BUILDDIR)/csl/fortran_finder.f95
-	@$(call PRINT_CC,$(FC) -ffree-form -x f95 -o "$@" "$<")
+$(BUILDDIR)/csl/fortran_finder.$(SHLIB_EXT): $(BUILDDIR)/csl/fortran_finder.f95
+	@$(call PRINT_CC,$(FC) -shared $(fPIC) -ffree-form -x f95 -o "$@" "$<")
 
 # We're going to capture things we directly depend on:
 CSL_LIBS := libgcc_s libstdc++ libc++ libpthread libgfortran libquadmath
@@ -30,10 +39,10 @@ CSL_LIBS += libgcc_ext libgomp libiomp libasan libatomic libcilkrts libitm libls
 # Things that I don't think anything in the Julia ecosystem uses, but are still included in the real CSL_jll
 CSL_LIBS += libobjc libobjc-gnu
 
-$(BUILDDIR)/csl/libraries.list: $(BUILDDIR)/csl/cxx_finder$(EXE) $(BUILDDIR)/csl/fortran_finder$(EXE) | $(build_prefix)/manifest/libwhich
+$(BUILDDIR)/csl/libraries.list: $(BUILDDIR)/csl/cxx_finder.$(SHLIB_EXT) $(BUILDDIR)/csl/fortran_finder.$(SHLIB_EXT) | $(build_prefix)/manifest/libwhich
 	@rm -f "$@" "$@.preuniq"
-	@$(call spawn,$(build_depsbindir)/libwhich) -a $(BUILDDIR)/csl/cxx_finder$(EXE) | tr '\0' '\n' | grep $(foreach lib,$(CSL_LIBS),-e $(lib)) >> "$@.preuniq"
-	@$(call spawn,$(build_depsbindir)/libwhich) -a $(BUILDDIR)/csl/fortran_finder$(EXE) | tr '\0' '\n' | grep $(foreach lib,$(CSL_LIBS),-e $(lib)) >> "$@.preuniq"
+	@$(call spawn,$(build_depsbindir)/libwhich) -a $(BUILDDIR)/csl/cxx_finder.$(SHLIB_EXT) | tr '\0' '\n' | grep $(foreach lib,$(CSL_LIBS),-e $(lib)) >> "$@.preuniq"
+	@$(call spawn,$(build_depsbindir)/libwhich) -a $(BUILDDIR)/csl/fortran_finder.$(SHLIB_EXT) | tr '\0' '\n' | grep $(foreach lib,$(CSL_LIBS),-e $(lib)) >> "$@.preuniq"
 	@cat "$@.preuniq" | sort | uniq > "$@"
 	@rm -f "$@.preuniq"
 
